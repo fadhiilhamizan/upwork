@@ -1,0 +1,13 @@
+# Authenticated Upwork session. Never commit this, it is a live credential.
+storage_state.json
+
+# Local run state and generated report
+seen_jobs.json
+Upwork_Daily_Job_Report.xlsx
+debug_*.html
+debug_*.png
+
+__pycache__/
+*.pyc
+.venv/
+venv/
