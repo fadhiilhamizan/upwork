@@ -8,8 +8,11 @@ that only show up against Upwork: the Cloudflare interstitial, an expired
 session, and the cookie banner. Run this after changing any selector.
 """
 
+import json
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
@@ -18,8 +21,10 @@ import demo_source
 import parsing
 import scoring
 from models import Job
+import browser
+import import_cookies
 from scraper import (JS_EXTRACT, SessionExpiredError, UpworkScraper,
-                     _launch_kwargs, build_job_from_raw)
+                     build_job_from_raw)
 
 PASSED = []
 FAILED = []
@@ -127,11 +132,72 @@ def test_scoring():
     check("fit bands stay spread across a run", all(bands.values()), str(bands))
 
 
+def test_cookie_import():
+    print("\nCookie import")
+    future = int(time.time()) + 86_400 * 30
+    past = int(time.time()) - 86_400
+
+    with tempfile.TemporaryDirectory() as tmp:
+        netscape = Path(tmp) / "cookies.txt"
+        netscape.write_text(
+            "# Netscape HTTP Cookie File\n"
+            f"#HttpOnly_.upwork.com\tTRUE\t/\tTRUE\t{future}\tmaster_access_token\tabc\n"
+            f".upwork.com\tTRUE\t/\tTRUE\t{past}\tstale\told\n"
+            f".google.com\tTRUE\t/\tTRUE\t{future}\tSID\tother\n",
+            encoding="utf-8",
+        )
+        parsed = import_cookies.clean(import_cookies.load_cookies(netscape))
+        check("netscape export keeps live Upwork cookies only",
+              [c["name"] for c in parsed] == ["master_access_token"],
+              str([c["name"] for c in parsed]))
+        check("httpOnly prefix is read from the netscape format",
+              parsed and parsed[0]["httpOnly"] is True)
+
+        editor = Path(tmp) / "cookies.json"
+        editor.write_text(json.dumps([
+            {"domain": ".upwork.com", "expirationDate": future, "httpOnly": True,
+             "name": "master_access_token", "path": "/",
+             "sameSite": "no_restriction", "secure": False, "value": "abc"},
+            {"domain": ".facebook.com", "name": "xs", "value": "no", "path": "/"},
+        ]), encoding="utf-8")
+        parsed = import_cookies.clean(import_cookies.load_cookies(editor))
+        check("cookie editor export is filtered to Upwork",
+              [c["name"] for c in parsed] == ["master_access_token"])
+        check("sameSite None is upgraded to secure, as Playwright requires",
+              parsed and parsed[0]["sameSite"] == "None" and parsed[0]["secure"] is True)
+
+        state = Path(tmp) / "state.json"
+        state.write_text(json.dumps({"cookies": [
+            {"name": "oauth2_global_js_token", "value": "v", "domain": ".upwork.com",
+             "path": "/", "expires": -1, "httpOnly": False, "secure": True,
+             "sameSite": "Lax"}], "origins": []}), encoding="utf-8")
+        parsed = import_cookies.clean(import_cookies.load_cookies(state))
+        check("an existing storage_state file is accepted",
+              [c["name"] for c in parsed] == ["oauth2_global_js_token"])
+
+        empty = Path(tmp) / "none.txt"
+        empty.write_text("# nothing here\n", encoding="utf-8")
+        check("an export with no Upwork cookies yields nothing",
+              import_cookies.clean(import_cookies.load_cookies(empty)) == [])
+
+
 def test_browser_behaviour():
     print("\nBrowser behaviour")
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(**_launch_kwargs(True))
-        page = browser.new_page()
+        chrome = playwright.chromium.launch(**browser.launch_kwargs(True))
+        context = chrome.new_context()
+        browser.apply_stealth(context)
+        page = context.new_page()
+        page.set_content("<h1>probe</h1>")
+        check("navigator.webdriver is not exposed",
+              page.evaluate("() => navigator.webdriver") in (None, False))
+        check("window.chrome is present",
+              page.evaluate("() => !!window.chrome"))
+        check("automation switch is not passed to the browser",
+              "--enable-automation" not in browser.launch_kwargs(True)["args"]
+              and "--enable-automation"
+              in browser.launch_kwargs(True)["ignore_default_args"])
+
         scraper = make_scraper(page)
 
         # Cloudflare interstitial that resolves itself, like the real one.
@@ -194,7 +260,7 @@ def test_browser_behaviour():
         check("cookie banner is closed and not accepted", closed and not accepted,
               f"closed={closed} accepted={accepted}")
 
-        browser.close()
+        chrome.close()
 
 
 def test_extraction():
@@ -227,6 +293,7 @@ def main():
     print("=" * 60)
     test_parsers()
     test_scoring()
+    test_cookie_import()
     test_browser_behaviour()
     test_extraction()
 

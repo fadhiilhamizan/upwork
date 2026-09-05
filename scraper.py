@@ -8,6 +8,7 @@ from typing import List, Optional
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
+import browser
 import config
 import parsing
 from models import Job
@@ -146,16 +147,6 @@ RE_HOURLY = re.compile(r"hourly[^\n]*", re.I)
 RE_FIXED = re.compile(r"(?:fixed[- ]price|est(?:imated)?\.? budget)[^\n]*", re.I)
 
 
-def _launch_kwargs(headless: bool) -> dict:
-    kwargs = {
-        "headless": headless,
-        "args": ["--disable-blink-features=AutomationControlled"],
-    }
-    if config.CHROMIUM_EXECUTABLE_PATH:
-        kwargs["executable_path"] = config.CHROMIUM_EXECUTABLE_PATH
-    return kwargs
-
-
 def build_job_from_raw(raw: dict, category: str, keyword: str) -> Optional[Job]:
     """Turn one extracted card into a Job, filling gaps from the card text."""
     url = parsing.absolute_url(raw.get("href"))
@@ -213,23 +204,52 @@ class UpworkScraper:
 
     def __init__(self, playwright, headless: bool = True, verbose: bool = True):
         self.verbose = verbose
-        if not config.STORAGE_STATE_PATH.exists():
-            raise SessionExpiredError(
-                f"No saved session at {config.STORAGE_STATE_PATH}."
+        self.browser = None
+
+        if config.USE_PERSISTENT_PROFILE:
+            # Reuse the profile the login window created. Slower to start but
+            # far less likely to be challenged.
+            self.context = browser.launch_persistent(
+                playwright, browser.session_channel(), headless=headless
             )
-        self.browser = playwright.chromium.launch(**_launch_kwargs(headless))
-        self.context = self.browser.new_context(
-            storage_state=str(config.STORAGE_STATE_PATH),
-            user_agent=config.USER_AGENT,
-            viewport=config.VIEWPORT,
-            locale=config.LOCALE,
-        )
+        else:
+            if not config.STORAGE_STATE_PATH.exists():
+                raise SessionExpiredError(
+                    f"No saved session at {config.STORAGE_STATE_PATH}."
+                )
+            self.browser = self._launch(playwright, headless)
+            self.context = self.browser.new_context(
+                storage_state=str(config.STORAGE_STATE_PATH),
+                # The identity the cookies were issued to, captured at login.
+                user_agent=browser.session_user_agent(),
+                viewport=config.VIEWPORT,
+                locale=config.LOCALE,
+            )
+            browser.apply_stealth(self.context)
+
         self.context.set_default_timeout(config.NAV_TIMEOUT_MS)
-        self.page = self.context.new_page()
+        self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
         self._consent_dismissed = False
 
+    @staticmethod
+    def _launch(playwright, headless: bool):
+        """Launch the browser the login used, falling back to the bundled one."""
+        channel = browser.session_channel()
+        try:
+            return playwright.chromium.launch(
+                **browser.launch_kwargs(headless, channel)
+            )
+        except Exception:
+            if not channel:
+                raise
+            # The browser used at login is gone, carry on with the bundled one.
+            return playwright.chromium.launch(**browser.launch_kwargs(headless))
+
     def close(self) -> None:
-        for closer in (self.context.close, self.browser.close):
+        closers = [self.context.close]
+        if self.browser is not None:
+            closers.append(self.browser.close)
+        for closer in closers:
             try:
                 closer()
             except Exception:
@@ -405,7 +425,7 @@ def scrape_all(searches=None, headless: bool = None, verbose: bool = True):
     headless = config.HEADLESS if headless is None else headless
 
     # Checked before the browser starts, so a missing session fails fast.
-    if not config.STORAGE_STATE_PATH.exists():
+    if not config.USE_PERSISTENT_PROFILE and not config.STORAGE_STATE_PATH.exists():
         raise SessionExpiredError(
             f"No saved session at {config.STORAGE_STATE_PATH}."
         )

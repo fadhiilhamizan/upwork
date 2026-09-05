@@ -22,6 +22,15 @@ OUTPUT_PATH = PROJECT_DIR / "Upwork_Daily_Job_Report.xlsx"
 # Job IDs seen on previous runs, used to flag listings as new.
 SEEN_JOBS_PATH = PROJECT_DIR / "seen_jobs.json"
 
+# Browser profile used for the login window, and reused by the scraper when
+# USE_PERSISTENT_PROFILE is on. Keeping a profile makes the browser look like an
+# ordinary one rather than a fresh automated session every time.
+PROFILE_DIR = PROJECT_DIR / "browser_profile"
+
+# The browser identity captured during login, so the scraper can present the
+# same one the cookies were issued to.
+SESSION_META_PATH = PROJECT_DIR / "session_meta.json"
+
 # ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
@@ -235,6 +244,15 @@ FIT_HARD_LOW_MAX = 55
 # ---------------------------------------------------------------------------
 
 HEADLESS = True
+
+# Scrape using the saved browser profile rather than a clean context built from
+# storage_state.json. Slower to start but much less likely to be challenged,
+# which helps if Cloudflare keeps stopping the run.
+USE_PERSISTENT_PROFILE = False
+
+# Force a browser channel ("chrome", "msedge") instead of letting login_setup
+# pick one. Leave as None to autodetect.
+BROWSER_CHANNEL = None
 NAV_TIMEOUT_MS = 60_000
 CLOUDFLARE_TIMEOUT_MS = 45_000
 # Pause between page loads so the run does not hammer Upwork.

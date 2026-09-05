@@ -1,11 +1,21 @@
-# Authenticated Upwork session. Never commit this, it is a live credential.
+# Authenticated Upwork session and browser identity. Live credentials.
 storage_state.json
+session_meta.json
+
+# Browser profile created by login_setup.py. Contains the logged in session.
+browser_profile/
+
+# Cookie exports used by import_cookies.py. Delete these after importing.
+cookies.txt
+cookies.json
+*.cookies.json
 
 # Local run state and generated report
 seen_jobs.json
 Upwork_Daily_Job_Report.xlsx
 debug_*.html
 debug_*.png
+run.log
 
 __pycache__/
 *.pyc

@@ -15,7 +15,8 @@ from playwright.sync_api import sync_playwright
 import config
 import sample_jobs
 from models import Job
-from scraper import JS_EXTRACT, _launch_kwargs, build_job_from_raw
+import browser
+from scraper import JS_EXTRACT, build_job_from_raw
 
 # Mirrors the parts of Upwork's markup the scraper depends on: the data-test
 # attributes, the multi value attributes such as "UpCLineClamp JobDescription",
@@ -113,8 +114,8 @@ def scrape_demo(verbose: bool = True) -> List[Job]:
     max_age_hours = config.MAX_JOB_AGE_DAYS * 24
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(**_launch_kwargs(True))
-        page = browser.new_page(user_agent=config.USER_AGENT,
+        chrome = playwright.chromium.launch(**browser.launch_kwargs(True))
+        page = chrome.new_page(user_agent=config.USER_AGENT,
                                 viewport=config.VIEWPORT)
         try:
             for category, keywords in config.SEARCHES.items():
@@ -143,6 +144,6 @@ def scrape_demo(verbose: bool = True) -> List[Job]:
                         print(f"      page 1: {len(extracted)} cards, "
                               f"{kept} within {config.MAX_JOB_AGE_DAYS} days")
         finally:
-            browser.close()
+            chrome.close()
 
     return collected

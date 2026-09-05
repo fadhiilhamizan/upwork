@@ -28,24 +28,66 @@ export UPWORK_CHROMIUM_PATH=/path/to/chrome      # macOS / Linux
 set UPWORK_CHROMIUM_PATH=C:\path\to\chrome.exe   # Windows
 ```
 
-## Step 1: log in once
+## Step 1: get a logged in session
+
+Upwork silently ignores search filters such as "Payment verified" and the
+proposal bands for logged out visitors, so a real session is required. There are
+two ways to get one. Try the first, fall back to the second.
+
+### Option A: log in through the script
 
 ```bash
 python login_setup.py
 ```
 
-A real Chromium window opens on the Upwork login page. Log in by hand, including
-2FA and any device check, and solve the Cloudflare check if it appears. Once you
-can see your logged in Upwork feed, return to the terminal and press ENTER. The
-session is saved to `storage_state.json`.
+This opens a window using the real Chrome or Edge installed on your machine,
+with the automation flags stripped out, and waits while you log in by hand. Press
+ENTER in the terminal afterwards and the session is saved to
+`storage_state.json`, along with your browser's user agent in
+`session_meta.json`.
 
-This step is required, not optional. Upwork silently ignores search filters such
-as "Payment verified" and the proposal bands for logged out visitors, so a
-logged out scrape would return a different, much broader set of jobs than the
-filter checklist asks for.
+Check it afterwards:
 
-`storage_state.json` is a live credential. It is already in `.gitignore`. Keep it
-off shared machines and out of version control.
+```bash
+python login_setup.py --check
+```
+
+**"Continue with Google" will not work here.** Google refuses to sign in any
+browser driven by an automation tool, real Chrome included, and says so with a
+message about network restrictions at your location. Nothing on this side can
+change that. Use your Upwork email and password in that window. If your account
+has no password because you only ever signed in with Google, either add one at
+Upwork's account security settings, or use Option B.
+
+### Option B: import cookies from the browser you already use
+
+This never automates the login at all, so nothing can detect or block it. It is
+the reliable route when Option A gives you a blank page or a Google block.
+
+1. Log in to Upwork normally in Chrome, Edge or Firefox.
+2. Install a cookie export extension, such as "Get cookies.txt LOCALLY" or
+   "Cookie-Editor".
+3. With the Upwork tab open and logged in, export the cookies for `upwork.com`.
+4. Copy your user agent from `chrome://version` (the "User Agent" line).
+5. Import it:
+
+```bash
+python import_cookies.py cookies.txt --user-agent "<paste your user agent>"
+python login_setup.py --check
+```
+
+Netscape `cookies.txt`, a JSON export from a cookie editor, and an existing
+Playwright `storage_state.json` are all accepted. Pass the real user agent so the
+scraper presents the same browser identity the cookies were issued to.
+
+Delete the cookie export once imported.
+
+### Keep these files private
+
+`storage_state.json`, `session_meta.json` and `browser_profile/` are live
+credentials: anyone holding them is logged in as you. They are all in
+`.gitignore`. Never commit them, never paste their contents into a chat, an
+issue or a support ticket.
 
 ## Step 2: run the report
 
@@ -155,6 +197,31 @@ your shell environment:
 Either way, expect to rerun `login_setup.py` every so often. Upwork sessions do
 not last forever, and the script tells you when the saved one stops working.
 
+## Troubleshooting login
+
+**"Continue with Google is not available due to network restrictions and/or
+traffic blocking at your location."** Google's own block on automated browsers.
+Use email and password, or Option B above.
+
+**The login page is blank white.** Upwork's login app refused to render for the
+browser it was given. In order: make sure Chrome or Edge is installed so
+`login_setup.py` does not fall back to Playwright's bundled test build (the
+script prints which browser it used); try reloading in the window; then use
+Option B.
+
+**Upwork rejects the session on the next run.** Sessions expire. Rerun
+`login_setup.py`, or re-export cookies. `python login_setup.py --check` tells you
+whether the saved session is still good without running a full scrape.
+
+**Cloudflare keeps stopping the scrape.** Set `USE_PERSISTENT_PROFILE = True` in
+`config.py`. The scrape then reuses the same browser profile the login created
+instead of a clean context, which is much less likely to be challenged. It starts
+more slowly.
+
+**No installed browser is found.** Set `UPWORK_CHROMIUM_PATH` to a Chrome, Edge
+or Chromium binary, or set `BROWSER_CHANNEL` in `config.py` to `"chrome"` or
+`"msedge"`.
+
 ## Maintenance
 
 Upwork's `data-test` attributes are more stable than its generated class names,
@@ -165,7 +232,8 @@ fallback selectors, so one rename usually will not break the run.
 python selftest.py
 ```
 
-25 offline checks over the parsers, the scoring rules, the Cloudflare
+34 offline checks over the parsers, the scoring rules, cookie import, the
+automation flag removal, the Cloudflare
 interstitial handling, expired session detection, cookie banner dismissal, and
 card extraction against Upwork shaped markup. No network access needed. Run it
 after changing any selector.
@@ -178,7 +246,9 @@ attributes, and add them to the selector lists at the top of `scraper.py`.
 
 | File | Purpose |
 | --- | --- |
-| `login_setup.py` | One time manual login, saves `storage_state.json` |
+| `login_setup.py` | Manual login in a real browser, and `--check` to test a saved session |
+| `import_cookies.py` | Builds `storage_state.json` from a cookie export, for when login is blocked |
+| `browser.py` | Browser launching, automation flag removal, saved browser identity |
 | `pull_jobs.py` | Main entry point: scrape, score, write the workbook |
 | `config.py` | Categories, keywords, search URL, scoring weights, paths |
 | `scraper.py` | Playwright scraping, Cloudflare and session handling, card extraction |
