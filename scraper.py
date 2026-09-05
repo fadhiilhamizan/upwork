@@ -212,6 +212,11 @@ class UpworkScraper:
             self.context = browser.launch_persistent(
                 playwright, browser.session_channel(), headless=headless
             )
+            # A session imported from another browser lives in
+            # storage_state.json, not in this profile, so carry it over.
+            seeded = browser.seed_cookies_from_storage_state(self.context)
+            if seeded and verbose:
+                print(f"  Loaded {seeded} saved cookie(s) into the browser profile.")
         else:
             if not config.STORAGE_STATE_PATH.exists():
                 raise SessionExpiredError(

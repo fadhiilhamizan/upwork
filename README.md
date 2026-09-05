@@ -61,26 +61,38 @@ Upwork's account security settings, or use Option B.
 
 ### Option B: import cookies from the browser you already use
 
-This never automates the login at all, so nothing can detect or block it. It is
-the reliable route when Option A gives you a blank page or a Google block.
+This never automates the login, so there is nothing for Upwork, Cloudflare or
+Google to detect. Use it when Option A gives you a blank page, stalls on the
+Cloudflare check, or when your account only has Google sign in.
 
 1. Log in to Upwork normally in Chrome, Edge or Firefox.
 2. Install a cookie export extension, such as "Get cookies.txt LOCALLY" or
    "Cookie-Editor".
 3. With the Upwork tab open and logged in, export the cookies for `upwork.com`.
-4. Copy your user agent from `chrome://version` (the "User Agent" line).
-5. Import it:
+   Leave the downloaded file wherever your browser put it.
+4. Run the importer and paste your user agent when it asks. Find it at
+   `chrome://version`, on the "User Agent" line.
 
 ```bash
-python import_cookies.py cookies.txt --user-agent "<paste your user agent>"
+python import_cookies.py
 python login_setup.py --check
 ```
 
-Netscape `cookies.txt`, a JSON export from a cookie editor, and an existing
-Playwright `storage_state.json` are all accepted. Pass the real user agent so the
-scraper presents the same browser identity the cookies were issued to.
+With no arguments it searches the project folder, Downloads and Desktop for a
+cookie export that actually contains Upwork cookies, and uses the newest one. To
+name the file yourself:
 
-Delete the cookie export once imported.
+```bash
+python import_cookies.py "C:\Users\you\Downloads\www.upwork.com_cookies.txt" ^
+  --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+```
+
+Netscape `cookies.txt`, a JSON export from a cookie editor, and an existing
+Playwright `storage_state.json` are all accepted. The user agent matters: the
+cookies were issued to that browser identity, and the scraper presents the same
+one.
+
+Delete the cookie export once it is imported.
 
 ### Keep these files private
 
@@ -213,10 +225,16 @@ Option B.
 `login_setup.py`, or re-export cookies. `python login_setup.py --check` tells you
 whether the saved session is still good without running a full scrape.
 
-**Cloudflare keeps stopping the scrape.** Set `USE_PERSISTENT_PROFILE = True` in
-`config.py`. The scrape then reuses the same browser profile the login created
-instead of a clean context, which is much less likely to be challenged. It starts
-more slowly.
+**The Cloudflare check appears and then the page goes blank.** Same detection as
+the blank login page: the check passes, then Upwork's app refuses to render for
+an automated browser. Use Option B.
+
+**Cloudflare keeps stopping the scrape itself.** Set `USE_PERSISTENT_PROFILE =
+True` in `config.py` and run `python pull_jobs.py --headful`. The scrape then
+reuses a real browser profile instead of a clean context, which is much less
+likely to be challenged. Cookies from `storage_state.json` are loaded into that
+profile automatically, so this works with an imported session too. It starts more
+slowly and needs a visible desktop, so it is not suited to a scheduled run.
 
 **No installed browser is found.** Set `UPWORK_CHROMIUM_PATH` to a Chrome, Edge
 or Chromium binary, or set `BROWSER_CHANNEL` in `config.py` to `"chrome"` or

@@ -9,7 +9,12 @@ your everyday browser and hand the resulting session over.
     1. Log in to Upwork normally, in Chrome, Edge or Firefox.
     2. Export the cookies for upwork.com with a cookie export extension, for
        example "Get cookies.txt LOCALLY" or "Cookie-Editor".
-    3. python import_cookies.py cookies.txt --user-agent "<your UA>"
+    3. python import_cookies.py
+
+       It finds the export in your Downloads folder and asks for your user
+       agent. To be explicit instead:
+
+       python import_cookies.py cookies.txt --user-agent "<your UA>"
 
 Find your user agent at chrome://version (the "User Agent" line), or by running
 navigator.userAgent in the browser console. Passing it matters: the scraper then
@@ -155,26 +160,93 @@ def clean(cookies: List[dict]) -> List[dict]:
     return kept
 
 
+# Where a browser normally drops an export, newest first wins.
+SEARCH_DIRS = [
+    config.PROJECT_DIR,
+    Path.home() / "Downloads",
+    Path.home() / "Desktop",
+    Path.cwd(),
+]
+
+SEARCH_PATTERNS = ["*cookies*.txt", "*cookies*.json", "*upwork*.txt",
+                   "*upwork*.json"]
+
+
+def find_cookie_files() -> List[Path]:
+    """Look for cookie exports that actually contain Upwork cookies."""
+    seen, candidates = set(), []
+    for directory in SEARCH_DIRS:
+        try:
+            if not directory.is_dir():
+                continue
+        except OSError:
+            continue
+        for pattern in SEARCH_PATTERNS:
+            for path in directory.glob(pattern):
+                resolved = path.resolve()
+                if resolved in seen or not path.is_file():
+                    continue
+                seen.add(resolved)
+                try:
+                    if clean(load_cookies(path)):
+                        candidates.append(path)
+                except Exception:
+                    continue
+    candidates.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    return candidates
+
+
+def prompt_user_agent() -> str:
+    """Ask for the user agent, since it cannot be detected from here."""
+    print("  Paste the user agent of the browser you exported from.")
+    print("  Open chrome://version and copy the whole 'User Agent' line.")
+    print("  Press ENTER on its own to skip.")
+    try:
+        return input("  User agent: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Turn a browser cookie export into storage_state.json."
     )
-    parser.add_argument("cookie_file",
-                        help="cookies.txt or JSON exported from your browser")
+    parser.add_argument("cookie_file", nargs="?", default=None,
+                        help="cookies.txt or JSON exported from your browser. "
+                             "Omit it and the usual download folders are searched.")
     parser.add_argument("--user-agent", default=None,
                         help="the user agent of the browser you exported from, "
-                             "from chrome://version")
+                             "from chrome://version. You are asked for it if "
+                             "you leave it out.")
     args = parser.parse_args(argv)
-
-    source = Path(args.cookie_file).expanduser()
-    if not source.exists():
-        print(f"No such file: {source}")
-        return 1
 
     print("=" * 72)
     print("Importing an Upwork session from a cookie export")
     print("=" * 72)
     print()
+
+    if args.cookie_file:
+        source = Path(args.cookie_file).expanduser()
+        if not source.exists():
+            print(f"  No such file: {source}")
+            return 1
+    else:
+        found = find_cookie_files()
+        if not found:
+            print("  No cookie export with Upwork cookies was found in:")
+            for directory in SEARCH_DIRS:
+                print(f"    {directory}")
+            print()
+            print("  Export the cookies again with the Upwork tab open and")
+            print("  logged in, then either leave the file in your Downloads")
+            print("  folder and rerun this, or pass the path:")
+            print("    python import_cookies.py path/to/cookies.txt")
+            return 1
+        source = found[0]
+        print(f"  Using: {source}")
+        if len(found) > 1:
+            print(f"  ({len(found) - 1} other export(s) found, this is the newest.)")
+        print()
 
     cookies = clean(load_cookies(source))
     if not cookies:
@@ -199,11 +271,23 @@ def main(argv=None) -> int:
     )
 
     user_agent = args.user_agent
+    if not user_agent:
+        print()
+        # Returns empty when there is no stdin, as under a scheduler.
+        user_agent = prompt_user_agent()
+
+    if user_agent and "Mozilla/" not in user_agent:
+        print()
+        print("  That does not look like a user agent, so it is being ignored.")
+        print("  It should start with Mozilla/5.0 and name your Chrome version.")
+        user_agent = ""
+
     if user_agent:
         browser.save_session_meta(user_agent, None)
+        print(f"\n  Browser identity recorded: {user_agent[:70]}...")
     else:
         print()
-        print("  No --user-agent given, so a default one is recorded. If Upwork")
+        print("  No user agent given, so a default one is recorded. If Upwork")
         print("  rejects the session, rerun with the real one from")
         print("  chrome://version, it has to match the browser you exported from.")
         browser.save_session_meta(config.USER_AGENT, None)

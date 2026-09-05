@@ -250,6 +250,28 @@ def test_browser_behaviour():
             ok = False
         check("a live session is not flagged as expired", ok)
 
+        # Cookies from storage_state.json reach a persistent style context.
+        state_backup = None
+        if config.STORAGE_STATE_PATH.exists():
+            state_backup = config.STORAGE_STATE_PATH.read_text(encoding="utf-8")
+        try:
+            config.STORAGE_STATE_PATH.write_text(json.dumps({"cookies": [{
+                "name": "master_access_token", "value": "probe",
+                "domain": ".upwork.com", "path": "/", "expires": -1,
+                "httpOnly": True, "secure": True, "sameSite": "Lax"}],
+                "origins": []}), encoding="utf-8")
+            seed_context = chrome.new_context()
+            count = browser.seed_cookies_from_storage_state(seed_context)
+            names = [c["name"] for c in seed_context.cookies("https://www.upwork.com/")]
+            seed_context.close()
+            check("saved cookies are injected into a persistent profile",
+                  count == 1 and names == ["master_access_token"], str(names))
+        finally:
+            if state_backup is None:
+                config.STORAGE_STATE_PATH.unlink(missing_ok=True)
+            else:
+                config.STORAGE_STATE_PATH.write_text(state_backup, encoding="utf-8")
+
         # The cookie banner is closed, never accepted.
         page.set_content(demo_source.render_page(
             [j for j in demo_source.sample_jobs.SAMPLE_JOBS[:2]]))

@@ -121,6 +121,30 @@ def open_login_browser(playwright, preferred: Optional[str] = None):
     )
 
 
+def seed_cookies_from_storage_state(context) -> int:
+    """Copy the saved cookies into a persistent context.
+
+    A profile created by login_setup.py already carries the session. One being
+    used alongside a session that came from import_cookies.py does not, so the
+    cookies have to be injected or the profile browses logged out.
+    """
+    if not config.STORAGE_STATE_PATH.exists():
+        return 0
+    try:
+        data = json.loads(config.STORAGE_STATE_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return 0
+
+    cookies = [c for c in data.get("cookies", []) if c.get("name")]
+    if not cookies:
+        return 0
+    try:
+        context.add_cookies(cookies)
+        return len(cookies)
+    except Exception:
+        return 0
+
+
 # ---------------------------------------------------------------------------
 # Session metadata
 #
